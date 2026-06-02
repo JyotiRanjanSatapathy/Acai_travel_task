@@ -1,0 +1,47 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[5m])) by (http_path)",
+          "legendFormat": "{{http_path}}"
+        }
+      ]
+    },
+    {
+      "title": "Error Rate (5xx req/s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{http_status=~\"5..\"}[5m])) by (http_path)",
+          "legendFormat": "{{http_path}}"
+        }
+      ]
+    },
+    {
+      "title": "p95 Latency (seconds)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, http_path))",
+          "legendFormat": "{{http_path}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["acai", "http"],
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "Acai Chat - HTTP Metrics",
+  "uid": "acai-chat-http"
+}
