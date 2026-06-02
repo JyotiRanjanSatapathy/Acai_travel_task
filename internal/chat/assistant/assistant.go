@@ -29,15 +29,17 @@ func (a *Assistant) Title(ctx context.Context, conv *model.Conversation) (string
 
 	slog.InfoContext(ctx, "Generating title for conversation", "conversation_id", conv.ID)
 
-	msgs := make([]openai.ChatCompletionMessageParamUnion, len(conv.Messages))
-
-	msgs[0] = openai.AssistantMessage("Generate a concise, descriptive title for the conversation based on the user message. The title should be a single line, no more than 80 characters, and should not include any special characters or emojis.")
-	for i, m := range conv.Messages {
-		msgs[i] = openai.UserMessage(m.Content)
+	msgs := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(
+			"You are a title generator. Reply with ONLY a short topic title (3-6 words) " +
+				"for the user's message. Never answer, explain, or address the message. " +
+				"No surrounding quotes, no trailing punctuation, no emojis or special characters.",
+		),
+		openai.UserMessage("Generate a title for this conversation message:\n\n" + conv.Messages[0].Content),
 	}
 
 	resp, err := a.cli.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:    openai.ChatModelO1,
+		Model:    openai.ChatModelGPT4_1Mini,
 		Messages: msgs,
 	})
 
@@ -87,12 +89,29 @@ func (a *Assistant) Reply(ctx context.Context, conv *model.Conversation) (string
 			Tools: []openai.ChatCompletionToolUnionParam{
 				openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 					Name:        "get_weather",
-					Description: openai.String("Get weather at the given location"),
+					Description: openai.String("Get the current weather at the given location"),
 					Parameters: openai.FunctionParameters{
 						"type": "object",
 						"properties": map[string]any{
 							"location": map[string]string{
 								"type": "string",
+							},
+						},
+						"required": []string{"location"},
+					},
+				}),
+				openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+					Name:        "get_forecast",
+					Description: openai.String("Get a multi-day weather forecast (up to 3 days) for the given location"),
+					Parameters: openai.FunctionParameters{
+						"type": "object",
+						"properties": map[string]any{
+							"location": map[string]string{
+								"type": "string",
+							},
+							"days": map[string]string{
+								"type":        "integer",
+								"description": "Number of days to forecast, between 1 and 3. Defaults to 3 if not provided.",
 							},
 						},
 						"required": []string{"location"},
@@ -142,7 +161,38 @@ func (a *Assistant) Reply(ctx context.Context, conv *model.Conversation) (string
 
 				switch call.Function.Name {
 				case "get_weather":
-					msgs = append(msgs, openai.ToolMessage("weather is fine", call.ID))
+					var payload struct {
+						Location string `json:"location"`
+					}
+					if err := json.Unmarshal([]byte(call.Function.Arguments), &payload); err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to parse tool call arguments: "+err.Error(), call.ID))
+						break
+					}
+
+					result, err := GetWeather(ctx, payload.Location)
+					if err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to get weather", call.ID))
+						break
+					}
+
+					msgs = append(msgs, openai.ToolMessage(result, call.ID))
+				case "get_forecast":
+					var payload struct {
+						Location string `json:"location"`
+						Days     int    `json:"days"`
+					}
+					if err := json.Unmarshal([]byte(call.Function.Arguments), &payload); err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to parse tool call arguments: "+err.Error(), call.ID))
+						break
+					}
+
+					result, err := GetForecast(ctx, payload.Location, payload.Days)
+					if err != nil {
+						msgs = append(msgs, openai.ToolMessage("failed to get forecast", call.ID))
+						break
+					}
+
+					msgs = append(msgs, openai.ToolMessage(result, call.ID))
 				case "get_today_date":
 					msgs = append(msgs, openai.ToolMessage(time.Now().Format(time.RFC3339), call.ID))
 				case "get_holidays":

@@ -10,6 +10,7 @@ import (
 	"github.com/acai-travel/tech-challenge/internal/pb"
 	"github.com/twitchtv/twirp"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"golang.org/x/sync/errgroup"
 )
 
 var _ pb.ChatService = (*Server)(nil)
@@ -47,18 +48,39 @@ func (s *Server) StartConversation(ctx context.Context, req *pb.StartConversatio
 		return nil, twirp.RequiredArgumentError("message")
 	}
 
-	// choose a title
-	title, err := s.assist.Title(ctx, conversation)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to generate conversation title", "error", err)
-	} else {
-		conversation.Title = title
+	// Run Title and Reply concurrently — both hit OpenAI; halves StartConversation latency.
+	var (
+		title string
+		reply string
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		t, err := s.assist.Title(gctx, conversation)
+		if err != nil {
+			slog.ErrorContext(gctx, "Failed to generate conversation title", "error", err)
+			return nil // non-fatal: fall back to default title
+		}
+		title = t
+		return nil
+	})
+
+	g.Go(func() error {
+		r, err := s.assist.Reply(gctx, conversation)
+		if err != nil {
+			return err
+		}
+		reply = r
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	// generate a reply
-	reply, err := s.assist.Reply(ctx, conversation)
-	if err != nil {
-		return nil, err
+	if title != "" {
+		conversation.Title = title
 	}
 
 	conversation.Messages = append(conversation.Messages, &model.Message{
@@ -146,10 +168,6 @@ func (s *Server) DescribeConversation(ctx context.Context, req *pb.DescribeConve
 	conversation, err := s.repo.DescribeConversation(ctx, req.GetConversationId())
 	if err != nil {
 		return nil, err
-	}
-
-	if conversation == nil {
-		return nil, twirp.NotFoundError("conversation not found")
 	}
 
 	return &pb.DescribeConversationResponse{Conversation: conversation.Proto()}, nil

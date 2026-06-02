@@ -97,10 +97,19 @@ func (r *Repository) UpdateConversation(ctx context.Context, c *Conversation) er
 }
 
 func (r *Repository) DeleteConversation(ctx context.Context, id string) error {
-	_, err := r.conn.Collection(conversationCollection).DeleteOne(ctx, map[string]any{"_id": id})
-	if errors.Is(err, mongo.ErrNoDocuments) {
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return twirp.NotFoundError("invalid conversation ID")
+	}
+
+	res, err := r.conn.Collection(conversationCollection).DeleteOne(ctx, map[string]any{"_id": oid})
+	if err != nil {
+		return err
+	}
+
+	if res.DeletedCount == 0 {
 		return twirp.NotFoundError("conversation not found")
 	}
 
-	return err
+	return nil
 }

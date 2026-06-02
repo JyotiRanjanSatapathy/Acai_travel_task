@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/acai-travel/tech-challenge/internal/pb"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	_ = godotenv.Load()
 	flag.Usage = func() {
 		fmt.Printf("Usage: acai-cli [command] [options]\n")
 		fmt.Println("Commands:")
