@@ -7,21 +7,40 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
-// InitMetrics sets up the OpenTelemetry metrics SDK with a Prometheus exporter.
-func InitMetrics(ctx context.Context) (func(), error) {
-	exporter, err := prometheus.New()
+// Init wires up OpenTelemetry metrics and tracing with simple exporters:
+//   - Metrics: a Prometheus exporter, scraped from the /metrics HTTP endpoint.
+//   - Tracing: a stdout exporter, so request spans are printed to the logs.
+//
+// It returns a cleanup function that flushes and shuts down both providers.
+func Init(ctx context.Context) (func(), error) {
+	// Metrics.
+	metricExporter, err := prometheus.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize prometheus exporter: %w", err)
 	}
 
-	provider := metric.NewMeterProvider(metric.WithReader(exporter))
-	otel.SetMeterProvider(provider)
+	meterProvider := metric.NewMeterProvider(metric.WithReader(metricExporter))
+	otel.SetMeterProvider(meterProvider)
+
+	// Tracing.
+	traceExporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize stdout trace exporter: %w", err)
+	}
+
+	tracerProvider := trace.NewTracerProvider(trace.WithBatcher(traceExporter))
+	otel.SetTracerProvider(tracerProvider)
 
 	cleanup := func() {
-		if err := provider.Shutdown(ctx); err != nil {
+		if err := tracerProvider.Shutdown(ctx); err != nil {
+			slog.Error("failed to shutdown tracer provider", "error", err)
+		}
+		if err := meterProvider.Shutdown(ctx); err != nil {
 			slog.Error("failed to shutdown meter provider", "error", err)
 		}
 	}

@@ -23,7 +23,7 @@ func main() {
 	_ = godotenv.Load()
 
 	// Initialize Telemetry
-	cleanup, err := telemetry.InitMetrics(context.Background())
+	cleanup, err := telemetry.Init(context.Background())
 	if err != nil {
 		slog.Error("Failed to initialize telemetry", "error", err)
 	} else {
@@ -40,6 +40,7 @@ func main() {
 	// Configure handler
 	handler := mux.NewRouter()
 	handler.Use(
+		httpx.Tracing(),
 		httpx.Metrics(),
 		httpx.Logger(),
 		httpx.Recovery(),
